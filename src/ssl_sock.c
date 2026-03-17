@@ -107,6 +107,9 @@
 
 int nb_engines = 0;
 
+static OSSL_LIB_CTX *ossl_libctx;
+static const char *propq = NULL;
+
 static struct eb_root cert_issuer_tree = EB_ROOT; /* issuers tree from "issuers-chain-path" */
 static uint64_t sni_hash_seed = 0; /* Seed used to compute hash of SNIs */
 
@@ -3171,7 +3174,7 @@ int ckch_inst_new_load_store(const char *path, struct ckch_store *ckchs, struct 
 
 	data = ckchs->data;
 
-	ctx = SSL_CTX_new(SSLv23_server_method());
+	ctx = SSL_CTX_new_ex(ossl_libctx, propq, SSLv23_server_method());
 	if (!ctx) {
 		memprintf(err, "%sunable to allocate SSL context for cert '%s'.\n",
 		          err && *err ? *err : "", path);
@@ -3309,12 +3312,12 @@ static inline SSL_CTX *ssl_sock_new_ssl_ctx(int is_quic)
 	if (is_quic)
 		return ssl_quic_srv_new_ssl_ctx();
 	else
-		return SSL_CTX_new(SSLv23_client_method());
+		return SSL_CTX_new_ex(ossl_libctx, propq, SSLv23_client_method());
 }
 #else
 static inline SSL_CTX *ssl_sock_new_ssl_ctx(int is_quic)
 {
-	return SSL_CTX_new(SSLv23_client_method());
+	return SSL_CTX_new_ex(ossl_libctx, propq, SSLv23_client_method());
 }
 #endif
 
@@ -3974,7 +3977,7 @@ ssl_sock_initial_ctx(struct bind_conf *bind_conf)
 	int cfgerr = 0;
 	const int default_min_ver = CONF_TLSV12;
 
-	ctx = SSL_CTX_new(SSLv23_server_method());
+	ctx = SSL_CTX_new_ex(ossl_libctx, propq, SSLv23_server_method());
 	if (!ctx) {
 		cfgerr += 1;
 		ha_alert("Proxy '%s': failed to create an SSL context for bind '%s' at [%s:%d].\n",
@@ -8431,6 +8434,8 @@ static void __ssl_sock_init(void)
 	SSL_library_init();
 #elif HA_OPENSSL_VERSION_NUMBER >= 0x10100000L
 	OPENSSL_init_ssl(0, NULL);
+	ossl_libctx = OSSL_LIB_CTX_new();
+	OSSL_LIB_CTX_freeze(ossl_libctx, propq);
 #endif
 #if (!defined(OPENSSL_NO_COMP) && !defined(SSL_OP_NO_COMPRESSION))
 	cm = SSL_COMP_get_compression_methods();
@@ -8651,6 +8656,7 @@ static void __ssl_sock_deinit(void)
 #if defined(HAVE_SSL_OCSP)
 	ssl_destroy_ocsp_update_task();
 #endif
+	OSSL_LIB_CTX_free(ossl_libctx);
 }
 REGISTER_POST_DEINIT(__ssl_sock_deinit);
 
